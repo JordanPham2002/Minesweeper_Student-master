@@ -2,7 +2,7 @@
 # ==============================CS-199==================================
 # FILE:			MyAI.py
 #
-# AUTHOR: 		Justin Chung
+# AUTHOR: 		Jordan Pham, Van Khoa Vu
 #
 # DESCRIPTION:	This file contains the MyAI class. You will implement your
 #				agent in this file. You will write the 'getAction' function,
@@ -65,7 +65,12 @@ class MyAI( AI ):
 		if self._queue:
 			return self._executeNext()
 
-		# No logical move found, make a random guess
+		# Apply advanced subset logic
+		self._applyConstraintSubsets()
+		if self._queue:
+			return self._executeNext()
+
+		# No logical move found, make a probability-based guess
 		return self._guess()
 		########################################################################
 		#							YOUR CODE ENDS							   #
@@ -131,12 +136,86 @@ class MyAI( AI ):
 		self._lastY      = y
 		return Action(actionType, x, y)
 
-	def _guess(self):
+	def _applyConstraintSubsets(self):
+		constraints = []
 		for c in range(self._colDimension):
 			for r in range(self._rowDimension):
-				if self._board[c][r]['covered'] and not self._board[c][r]['flagged']:
-					self._lastAction = AI.Action.UNCOVER
-					self._lastX      = c
-					self._lastY      = r
-					return Action(AI.Action.UNCOVER, c, r)
-		return Action(AI.Action.LEAVE)
+				cell = self._board[c][r]
+				if cell['covered'] or cell['number'] <= 0:
+					continue
+				neighbors = self._getNeighbors(c, r)
+				covered = frozenset(
+					n for n in neighbors
+					if self._board[n[0]][n[1]]['covered']
+					and not self._board[n[0]][n[1]]['flagged']
+				)
+				flagged = sum(1 for n in neighbors if self._board[n[0]][n[1]]['flagged'])
+				remaining = cell['number'] - flagged
+				if covered and remaining >= 0:
+					constraints.append((covered, remaining))
+
+		for i in range(len(constraints)):
+			for j in range(len(constraints)):
+				if i == j:
+					continue
+				tiles_i, mines_i = constraints[i]
+				tiles_j, mines_j = constraints[j]
+				if tiles_i < tiles_j:
+					diff = tiles_j - tiles_i
+					diff_mines = mines_j - mines_i
+					if diff_mines == 0:
+						for (c, r) in diff:
+							if self._board[c][r]['covered'] and not self._board[c][r]['flagged']:
+								self._queue.append((AI.Action.UNCOVER, c, r))
+					elif diff_mines == len(diff):
+						for (c, r) in diff:
+							if not self._board[c][r]['flagged']:
+								self._queue.append((AI.Action.FLAG, c, r))
+
+	def _guess(self):
+		covered_tiles = [
+			(c, r) for c in range(self._colDimension)
+			for r in range(self._rowDimension)
+			if self._board[c][r]['covered'] and not self._board[c][r]['flagged']
+		]
+		if not covered_tiles:
+			return Action(AI.Action.LEAVE)
+
+		mine_probs = {}
+		for c in range(self._colDimension):
+			for r in range(self._rowDimension):
+				cell = self._board[c][r]
+				if cell['covered'] or cell['number'] <= 0:
+					continue
+				neighbors = self._getNeighbors(c, r)
+				covered = [
+					n for n in neighbors
+					if self._board[n[0]][n[1]]['covered']
+					and not self._board[n[0]][n[1]]['flagged']
+				]
+				flagged = sum(1 for n in neighbors if self._board[n[0]][n[1]]['flagged'])
+				remaining = cell['number'] - flagged
+				if covered:
+					prob = remaining / len(covered)
+					for tile in covered:
+						mine_probs[tile] = max(mine_probs.get(tile, 0), prob)
+
+		total_covered = len(covered_tiles)
+		total_flagged = sum(
+			1 for c in range(self._colDimension)
+			for r in range(self._rowDimension)
+			if self._board[c][r]['flagged']
+		)
+		global_prob = (self._totalMines - total_flagged) / total_covered if total_covered else 1.0
+
+		best, best_prob = None, float('inf')
+		for tile in covered_tiles:
+			prob = mine_probs.get(tile, global_prob)
+			if prob < best_prob:
+				best_prob = prob
+				best = tile
+
+		c, r = best
+		self._lastAction = AI.Action.UNCOVER
+		self._lastX, self._lastY = c, r
+		return Action(AI.Action.UNCOVER, c, r)
