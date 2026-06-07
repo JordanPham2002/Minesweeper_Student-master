@@ -60,6 +60,27 @@ class MyAI( AI ):
 		if self._queue:
 			return self._executeNext()
 
+		# Global mine count checks
+		covered_unflagged = [
+			(c, r) for c in range(self._colDimension)
+			for r in range(self._rowDimension)
+			if self._board[c][r]['covered'] and not self._board[c][r]['flagged']
+		]
+		total_flagged = sum(
+			1 for c in range(self._colDimension)
+			for r in range(self._rowDimension)
+			if self._board[c][r]['flagged']
+		)
+		remaining_mines = self._totalMines - total_flagged
+		if remaining_mines == 0:
+			for (c, r) in covered_unflagged:
+				self._queue.append((AI.Action.UNCOVER, c, r))
+		elif remaining_mines == len(covered_unflagged):
+			for (c, r) in covered_unflagged:
+				self._queue.append((AI.Action.FLAG, c, r))
+		if self._queue:
+			return self._executeNext()
+
 		# Apply constraint logic to find safe tiles and known mines
 		self._findMoves()
 		if self._queue:
@@ -154,6 +175,8 @@ class MyAI( AI ):
 				if covered and remaining >= 0:
 					constraints.append((covered, remaining))
 
+		to_uncover = set()
+		to_flag = set()
 		for i in range(len(constraints)):
 			for j in range(len(constraints)):
 				if i == j:
@@ -166,11 +189,15 @@ class MyAI( AI ):
 					if diff_mines == 0:
 						for (c, r) in diff:
 							if self._board[c][r]['covered'] and not self._board[c][r]['flagged']:
-								self._queue.append((AI.Action.UNCOVER, c, r))
+								to_uncover.add((c, r))
 					elif diff_mines == len(diff):
 						for (c, r) in diff:
 							if not self._board[c][r]['flagged']:
-								self._queue.append((AI.Action.FLAG, c, r))
+								to_flag.add((c, r))
+		for (c, r) in to_flag:
+			self._queue.append((AI.Action.FLAG, c, r))
+		for (c, r) in to_uncover:
+			self._queue.append((AI.Action.UNCOVER, c, r))
 
 	def _guess(self):
 		covered_tiles = [
